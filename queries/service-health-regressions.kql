@@ -1,0 +1,8 @@
+let lookback = 6h;
+Heartbeat
+| where TimeGenerated >= ago(lookback)
+| summarize HeartbeatCount = count(), LastHeartbeat = max(TimeGenerated) by Computer, _ResourceId
+| extend MinutesSinceLastHeartbeat = datetime_diff('minute', now(), LastHeartbeat)
+| where MinutesSinceLastHeartbeat > 10 or HeartbeatCount < 3
+| project Computer, _ResourceId, LastHeartbeat, MinutesSinceLastHeartbeat, HeartbeatCount
+| order by MinutesSinceLastHeartbeat desc

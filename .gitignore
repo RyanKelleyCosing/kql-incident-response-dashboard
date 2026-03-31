@@ -1,0 +1,19 @@
+# Bicep
+*.bicepbuild.json
+
+# Azure CLI
+.azure/
+*.azcli
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

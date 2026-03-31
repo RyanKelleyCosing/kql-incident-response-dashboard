@@ -1,0 +1,73 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# KQL-Powered Incident Response Dashboard\nUse this workbook to pivot quickly across failures, sign-in anomalies, and health regressions from a single Log Analytics workspace."
+      },
+      "name": "header"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let lookback = 24h;\nunion isfuzzy=true withsource=SourceTable AppExceptions, AppTraces, AzureDiagnostics\n| where TimeGenerated >= ago(lookback)\n| extend SeverityValue = coalesce(tolong(SeverityLevel), tolong(Level), 0)\n| extend Message = coalesce(tostring(OuterMessage), tostring(Message), tostring(RenderedDescription), tostring(ResultDescription))\n| where SeverityValue >= 3 or Message has_any ('critical', 'fatal', 'panic', 'sev0', 'sev1', 'high priority')\n| summarize EventCount = count(), LatestEvent = max(TimeGenerated) by SourceTable, bin(TimeGenerated, 15m)\n| order by TimeGenerated asc",
+        "size": 0,
+        "title": "High Severity Events",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{WorkbookSourceId}"
+        ],
+        "timeContext": {
+          "durationMs": 86400000
+        },
+        "visualization": "table"
+      },
+      "name": "highSeverityEvents"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let lookback = 24h;\nunion isfuzzy=true SigninLogs, AADNonInteractiveUserSignInLogs\n| where TimeGenerated >= ago(lookback)\n| extend FailureReason = coalesce(tostring(ResultDescription), tostring(Status.failureReason))\n| extend ResultCode = tostring(ResultType)\n| where ResultCode !in ('0', 'Success') or isnotempty(FailureReason)\n| summarize FailedAttempts = count(), DistinctIPs = dcount(IPAddress), LastAttempt = max(TimeGenerated) by UserPrincipalName, AppDisplayName\n| where FailedAttempts >= 5 or DistinctIPs >= 3\n| order by FailedAttempts desc, DistinctIPs desc",
+        "size": 0,
+        "title": "Authentication Anomalies",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{WorkbookSourceId}"
+        ],
+        "timeContext": {
+          "durationMs": 86400000
+        },
+        "visualization": "table"
+      },
+      "name": "authenticationAnomalies"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let lookback = 6h;\nHeartbeat\n| where TimeGenerated >= ago(lookback)\n| summarize HeartbeatCount = count(), LastHeartbeat = max(TimeGenerated) by Computer, _ResourceId\n| extend MinutesSinceLastHeartbeat = datetime_diff('minute', now(), LastHeartbeat)\n| where MinutesSinceLastHeartbeat > 10 or HeartbeatCount < 3\n| project Computer, _ResourceId, LastHeartbeat, MinutesSinceLastHeartbeat, HeartbeatCount\n| order by MinutesSinceLastHeartbeat desc",
+        "size": 0,
+        "title": "Service Health Regressions",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{WorkbookSourceId}"
+        ],
+        "timeContext": {
+          "durationMs": 21600000
+        },
+        "visualization": "table"
+      },
+      "name": "serviceHealthRegressions"
+    }
+  ],
+  "fallbackResourceIds": [
+    "{WorkbookSourceId}"
+  ],
+  "isLocked": false
+}

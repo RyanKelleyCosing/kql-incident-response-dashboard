@@ -1,0 +1,9 @@
+let lookback = 24h;
+union isfuzzy=true SigninLogs, AADNonInteractiveUserSignInLogs
+| where TimeGenerated >= ago(lookback)
+| extend FailureReason = coalesce(tostring(ResultDescription), tostring(Status.failureReason))
+| extend ResultCode = tostring(ResultType)
+| where ResultCode !in ('0', 'Success') or isnotempty(FailureReason)
+| summarize FailedAttempts = count(), DistinctIPs = dcount(IPAddress), LastAttempt = max(TimeGenerated) by UserPrincipalName, AppDisplayName
+| where FailedAttempts >= 5 or DistinctIPs >= 3
+| order by FailedAttempts desc, DistinctIPs desc
