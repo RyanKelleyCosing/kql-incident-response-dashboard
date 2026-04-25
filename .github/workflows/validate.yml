@@ -15,7 +15,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-bicep@v2
+
+      - name: Install Bicep CLI
+        shell: pwsh
+        run: az bicep install
+
       - name: Validate workbook and Bicep
         shell: pwsh
         run: ./tests/validate-dashboard.ps1
