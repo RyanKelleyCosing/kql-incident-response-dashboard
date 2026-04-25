@@ -8,7 +8,7 @@ function Invoke-BicepBuild {
 
     $bicepCommand = Get-Command bicep -ErrorAction SilentlyContinue
     if ($bicepCommand) {
-        & $bicepCommand.Source build --file $FilePath | Out-Null
+        & $bicepCommand.Source build $FilePath | Out-Null
         return
     }
 
