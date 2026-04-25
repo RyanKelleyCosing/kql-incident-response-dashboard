@@ -208,4 +208,4 @@ Send-SmtpDigest `
     -UseSsl $UseSsl `
     -SmtpCredential $SmtpCredential
 
-Write-Host "Sent daily SOC summary to $($resolvedRecipients -join ', ')"
+Write-Information "Sent daily SOC summary to $($resolvedRecipients -join ', ')" -InformationAction Continue
