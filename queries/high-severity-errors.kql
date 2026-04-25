@@ -1,12 +1,16 @@
 let lookback = 24h;
 union isfuzzy=true withsource=SourceTable AppExceptions, AppTraces, AzureDiagnostics
 | where TimeGenerated >= ago(lookback)
-| extend SeverityValue = coalesce(tolong(SeverityLevel), tolong(Level), 0)
+| extend SeverityValue = coalesce(
+    tolong(column_ifexists('SeverityLevel', 0)),
+    tolong(column_ifexists('Level', 0)),
+    0
+)
 | extend Message = coalesce(
-    tostring(OuterMessage),
-    tostring(Message),
-    tostring(RenderedDescription),
-    tostring(ResultDescription)
+    tostring(column_ifexists('OuterMessage', '')),
+    tostring(column_ifexists('Message', '')),
+    tostring(column_ifexists('RenderedDescription', '')),
+    tostring(column_ifexists('ResultDescription', ''))
 )
 | where SeverityValue >= 3 or Message has_any ('critical', 'fatal', 'panic', 'sev0', 'sev1', 'high priority')
 | summarize EventCount = count(), LatestEvent = max(TimeGenerated) by SourceTable, bin(TimeGenerated, 15m)

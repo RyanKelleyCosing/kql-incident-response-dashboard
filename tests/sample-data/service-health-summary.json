@@ -1,0 +1,11 @@
+[
+  {
+    "CurrentAffectedResources": 3,
+    "PreviousAffectedResources": 1,
+    "DeltaCount": 2,
+    "DeltaPercent": 200.0,
+    "WorstGapMinutesCurrent": 47,
+    "LatestEvent": "2026-04-16T07:25:00Z",
+    "TopEntity": "vm-prod-01"
+  }
+]

@@ -1,0 +1,13 @@
+[
+  {
+    "CurrentFailedAttempts": 37,
+    "PreviousFailedAttempts": 16,
+    "DeltaCount": 21,
+    "DeltaPercent": 131.25,
+    "CurrentAnomalousUsers": 4,
+    "PreviousAnomalousUsers": 2,
+    "MaxDistinctIPsCurrent": 6,
+    "LatestEvent": "2026-04-16T07:30:00Z",
+    "TopEntity": "svc-build@contoso.com @ Azure Portal"
+  }
+]

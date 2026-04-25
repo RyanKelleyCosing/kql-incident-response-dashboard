@@ -1,0 +1,61 @@
+name: Send Daily SOC Summary
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 12 * * *'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  send-digest:
+    runs-on: windows-latest
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.KQL_DIGEST_AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.KQL_DIGEST_AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.KQL_DIGEST_AZURE_SUBSCRIPTION_ID }}
+      WORKSPACE_ID: ${{ secrets.KQL_DIGEST_WORKSPACE_ID }}
+      KQL_DIGEST_SMTP_SERVER: ${{ secrets.KQL_DIGEST_SMTP_SERVER }}
+      KQL_DIGEST_SMTP_USERNAME: ${{ secrets.KQL_DIGEST_SMTP_USERNAME }}
+      KQL_DIGEST_SMTP_PASSWORD: ${{ secrets.KQL_DIGEST_SMTP_PASSWORD }}
+      KQL_DIGEST_EMAIL_FROM: ${{ secrets.KQL_DIGEST_EMAIL_FROM }}
+      KQL_DIGEST_EMAIL_TO: ${{ secrets.KQL_DIGEST_EMAIL_TO }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check digest configuration
+        id: config
+        shell: pwsh
+        run: |
+          $hasAzure = -not [string]::IsNullOrWhiteSpace($env:AZURE_CLIENT_ID) -and -not [string]::IsNullOrWhiteSpace($env:AZURE_TENANT_ID) -and -not [string]::IsNullOrWhiteSpace($env:AZURE_SUBSCRIPTION_ID)
+          $hasDigestInputs = -not [string]::IsNullOrWhiteSpace($env:WORKSPACE_ID) -and -not [string]::IsNullOrWhiteSpace($env:KQL_DIGEST_SMTP_SERVER) -and -not [string]::IsNullOrWhiteSpace($env:KQL_DIGEST_EMAIL_TO)
+          $hasSender = -not [string]::IsNullOrWhiteSpace($env:KQL_DIGEST_EMAIL_FROM) -or -not [string]::IsNullOrWhiteSpace($env:KQL_DIGEST_SMTP_USERNAME)
+
+          if ($hasAzure -and $hasDigestInputs -and $hasSender) {
+            'ready=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host 'Digest workflow is fully configured.'
+            return
+          }
+
+          'ready=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host 'Skipping scheduled digest because one or more required secrets are missing.'
+
+      - name: Azure login
+        if: steps.config.outputs.ready == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.KQL_DIGEST_AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.KQL_DIGEST_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.KQL_DIGEST_AZURE_SUBSCRIPTION_ID }}
+
+      - name: Send digest email
+        if: steps.config.outputs.ready == 'true'
+        shell: pwsh
+        run: |
+          ./scripts/Send-DailySocSummaryEmail.ps1 `
+            -WorkspaceId $env:WORKSPACE_ID `
+            -BodyFormat Markdown `
+            -ReportTitle 'Daily SOC Summary' `
+            -UseSsl $true

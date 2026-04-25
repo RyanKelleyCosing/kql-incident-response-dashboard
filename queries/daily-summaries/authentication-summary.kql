@@ -1,0 +1,45 @@
+let currentWindowStart = ago(24h);
+let previousWindowStart = ago(48h);
+let failedSignIns =
+    union isfuzzy=true SigninLogs, AADNonInteractiveUserSignInLogs
+    | where TimeGenerated >= previousWindowStart
+    | extend FailureReason = coalesce(tostring(ResultDescription), tostring(Status.failureReason))
+    | extend ResultCode = tostring(ResultType)
+    | where ResultCode !in ('0', 'Success') or isnotempty(FailureReason);
+let anomalySummary =
+    failedSignIns
+    | extend Window = iff(TimeGenerated >= currentWindowStart, 'Current', 'Previous')
+    | summarize FailedAttempts = count(), DistinctIPs = dcount(IPAddress), LastAttempt = max(TimeGenerated) by Window, UserPrincipalName, AppDisplayName
+    | where FailedAttempts >= 5 or DistinctIPs >= 3;
+let totals =
+    anomalySummary
+    | summarize
+        CurrentFailedAttempts = sumif(FailedAttempts, Window == 'Current'),
+        PreviousFailedAttempts = sumif(FailedAttempts, Window == 'Previous'),
+        CurrentAnomalousUsers = dcountif(UserPrincipalName, Window == 'Current'),
+        PreviousAnomalousUsers = dcountif(UserPrincipalName, Window == 'Previous'),
+        MaxDistinctIPsCurrent = maxif(DistinctIPs, Window == 'Current'),
+        LatestEvent = max(LastAttempt);
+let topCurrent =
+    anomalySummary
+    | where Window == 'Current'
+    | extend UserAndApp = strcat(coalesce(UserPrincipalName, 'unknown-user'), ' @ ', coalesce(AppDisplayName, 'unknown-app'))
+    | top 1 by FailedAttempts desc, DistinctIPs desc
+    | project TopEntity = UserAndApp;
+totals
+| extend JoinKey = 1
+| join kind=leftouter (topCurrent | extend JoinKey = 1) on JoinKey
+| project
+    CurrentFailedAttempts = coalesce(CurrentFailedAttempts, 0),
+    PreviousFailedAttempts = coalesce(PreviousFailedAttempts, 0),
+    DeltaCount = CurrentFailedAttempts - PreviousFailedAttempts,
+    DeltaPercent = iff(
+        PreviousFailedAttempts == 0,
+        real(null),
+        round((todouble(CurrentFailedAttempts - PreviousFailedAttempts) / todouble(PreviousFailedAttempts)) * 100.0, 2)
+    ),
+    CurrentAnomalousUsers = coalesce(CurrentAnomalousUsers, 0),
+    PreviousAnomalousUsers = coalesce(PreviousAnomalousUsers, 0),
+    MaxDistinctIPsCurrent = coalesce(MaxDistinctIPsCurrent, 0),
+    LatestEvent,
+    TopEntity = coalesce(TopEntity, 'None')

@@ -12,7 +12,7 @@
       "type": 9,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "let lookback = 24h;\nunion isfuzzy=true withsource=SourceTable AppExceptions, AppTraces, AzureDiagnostics\n| where TimeGenerated >= ago(lookback)\n| extend SeverityValue = coalesce(tolong(SeverityLevel), tolong(Level), 0)\n| extend Message = coalesce(tostring(OuterMessage), tostring(Message), tostring(RenderedDescription), tostring(ResultDescription))\n| where SeverityValue >= 3 or Message has_any ('critical', 'fatal', 'panic', 'sev0', 'sev1', 'high priority')\n| summarize EventCount = count(), LatestEvent = max(TimeGenerated) by SourceTable, bin(TimeGenerated, 15m)\n| order by TimeGenerated asc",
+        "query": "let lookback = 24h;\nunion isfuzzy=true withsource=SourceTable AppExceptions, AppTraces, AzureDiagnostics\n| where TimeGenerated >= ago(lookback)\n| extend SeverityValue = coalesce(tolong(column_ifexists('SeverityLevel', 0)), tolong(column_ifexists('Level', 0)), 0)\n| extend Message = coalesce(tostring(column_ifexists('OuterMessage', '')), tostring(column_ifexists('Message', '')), tostring(column_ifexists('RenderedDescription', '')), tostring(column_ifexists('ResultDescription', '')))\n| where SeverityValue >= 3 or Message has_any ('critical', 'fatal', 'panic', 'sev0', 'sev1', 'high priority')\n| summarize EventCount = count(), LatestEvent = max(TimeGenerated) by SourceTable, bin(TimeGenerated, 15m)\n| order by TimeGenerated asc",
         "size": 0,
         "title": "High Severity Events",
         "queryType": 0,

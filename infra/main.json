@@ -1,0 +1,245 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.41.2.15936",
+      "templateHash": "9203779314667557782"
+    }
+  },
+  "parameters": {
+    "environment": {
+      "type": "string",
+      "defaultValue": "dev",
+      "allowedValues": [
+        "dev",
+        "prod"
+      ],
+      "metadata": {
+        "description": "Environment name used in naming and tagging."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for the Log Analytics workspace and workbook."
+      }
+    },
+    "notificationEmail": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional email address for the incident response action group. Leave blank to skip action group deployment."
+      }
+    },
+    "deployScheduledAlerts": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Deploy scheduled query alert rules for the three incident-response signal families. Disabled by default for a dashboard-first, low-noise setup."
+      }
+    },
+    "enableHighSeverityAlert": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Create the high-severity errors alert when scheduled alerts are enabled. Disabled by default because it is the noisiest signal family."
+      }
+    },
+    "enableAuthenticationAlert": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Create the authentication anomalies alert when scheduled alerts are enabled. Enabled by default because sign-in abuse is worth monitoring proactively."
+      }
+    },
+    "enableServiceRegressionAlert": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Create the service health regressions alert when scheduled alerts are enabled. Enabled by default because heartbeat gaps are a reasonable low-noise operational signal."
+      }
+    },
+    "alertEvaluationFrequency": {
+      "type": "string",
+      "defaultValue": "PT30M",
+      "metadata": {
+        "description": "How often the scheduled query alerts evaluate their queries. The default favors lower noise over fast paging."
+      }
+    },
+    "alertWindowSize": {
+      "type": "string",
+      "defaultValue": "PT30M",
+      "metadata": {
+        "description": "The query window used by the scheduled query alerts. The default favors lower noise over fast paging."
+      }
+    },
+    "highSeverityAlertThreshold": {
+      "type": "int",
+      "defaultValue": 15,
+      "minValue": 0,
+      "metadata": {
+        "description": "Minimum aggregated high-severity events required before the failure alert fires. The default is intentionally conservative for dashboard-first deployments."
+      }
+    },
+    "authenticationAlertThreshold": {
+      "type": "int",
+      "defaultValue": 20,
+      "minValue": 0,
+      "metadata": {
+        "description": "Minimum aggregated failed sign-in attempts required before the authentication alert fires. The default is intentionally conservative for dashboard-first deployments."
+      }
+    },
+    "serviceRegressionAlertThreshold": {
+      "type": "int",
+      "defaultValue": 1,
+      "minValue": 0,
+      "metadata": {
+        "description": "Minimum affected resources required before the service regression alert fires. The default is intentionally conservative for dashboard-first deployments."
+      }
+    }
+  },
+  "variables": {
+    "$fxv#0": "let lookback = 24h;\r\nunion isfuzzy=true withsource=SourceTable AppExceptions, AppTraces, AzureDiagnostics\r\n| where TimeGenerated >= ago(lookback)\r\n| extend SeverityValue = coalesce(\r\n    tolong(column_ifexists('SeverityLevel', 0)),\r\n    tolong(column_ifexists('Level', 0)),\r\n    0\r\n)\r\n| extend Message = coalesce(\r\n    tostring(column_ifexists('OuterMessage', '')),\r\n    tostring(column_ifexists('Message', '')),\r\n    tostring(column_ifexists('RenderedDescription', '')),\r\n    tostring(column_ifexists('ResultDescription', ''))\r\n)\r\n| where SeverityValue >= 3 or Message has_any ('critical', 'fatal', 'panic', 'sev0', 'sev1', 'high priority')\r\n| summarize EventCount = count(), LatestEvent = max(TimeGenerated) by SourceTable, bin(TimeGenerated, 15m)\r\n| order by TimeGenerated asc",
+    "$fxv#1": "let lookback = 24h;\r\nunion isfuzzy=true SigninLogs, AADNonInteractiveUserSignInLogs\r\n| where TimeGenerated >= ago(lookback)\r\n| extend FailureReason = coalesce(tostring(ResultDescription), tostring(Status.failureReason))\r\n| extend ResultCode = tostring(ResultType)\r\n| where ResultCode !in ('0', 'Success') or isnotempty(FailureReason)\r\n| summarize FailedAttempts = count(), DistinctIPs = dcount(IPAddress), LastAttempt = max(TimeGenerated) by UserPrincipalName, AppDisplayName\r\n| where FailedAttempts >= 5 or DistinctIPs >= 3\r\n| order by FailedAttempts desc, DistinctIPs desc",
+    "$fxv#2": "let lookback = 6h;\r\nHeartbeat\r\n| where TimeGenerated >= ago(lookback)\r\n| summarize HeartbeatCount = count(), LastHeartbeat = max(TimeGenerated) by Computer, _ResourceId\r\n| extend MinutesSinceLastHeartbeat = datetime_diff('minute', now(), LastHeartbeat)\r\n| where MinutesSinceLastHeartbeat > 10 or HeartbeatCount < 3\r\n| project Computer, _ResourceId, LastHeartbeat, MinutesSinceLastHeartbeat, HeartbeatCount\r\n| order by MinutesSinceLastHeartbeat desc",
+    "$fxv#3": "{\r\n  \"version\": \"Notebook/1.0\",\r\n  \"items\": [\r\n    {\r\n      \"type\": 1,\r\n      \"content\": {\r\n        \"json\": \"# KQL-Powered Incident Response Dashboard\\nUse this workbook to pivot quickly across failures, sign-in anomalies, and health regressions from a single Log Analytics workspace.\"\r\n      },\r\n      \"name\": \"header\"\r\n    },\r\n    {\r\n      \"type\": 9,\r\n      \"content\": {\r\n        \"version\": \"KqlItem/1.0\",\r\n        \"query\": \"let lookback = 24h;\\nunion isfuzzy=true withsource=SourceTable AppExceptions, AppTraces, AzureDiagnostics\\n| where TimeGenerated >= ago(lookback)\\n| extend SeverityValue = coalesce(tolong(column_ifexists('SeverityLevel', 0)), tolong(column_ifexists('Level', 0)), 0)\\n| extend Message = coalesce(tostring(column_ifexists('OuterMessage', '')), tostring(column_ifexists('Message', '')), tostring(column_ifexists('RenderedDescription', '')), tostring(column_ifexists('ResultDescription', '')))\\n| where SeverityValue >= 3 or Message has_any ('critical', 'fatal', 'panic', 'sev0', 'sev1', 'high priority')\\n| summarize EventCount = count(), LatestEvent = max(TimeGenerated) by SourceTable, bin(TimeGenerated, 15m)\\n| order by TimeGenerated asc\",\r\n        \"size\": 0,\r\n        \"title\": \"High Severity Events\",\r\n        \"queryType\": 0,\r\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\r\n        \"crossComponentResources\": [\r\n          \"{WorkbookSourceId}\"\r\n        ],\r\n        \"timeContext\": {\r\n          \"durationMs\": 86400000\r\n        },\r\n        \"visualization\": \"table\"\r\n      },\r\n      \"name\": \"highSeverityEvents\"\r\n    },\r\n    {\r\n      \"type\": 9,\r\n      \"content\": {\r\n        \"version\": \"KqlItem/1.0\",\r\n        \"query\": \"let lookback = 24h;\\nunion isfuzzy=true SigninLogs, AADNonInteractiveUserSignInLogs\\n| where TimeGenerated >= ago(lookback)\\n| extend FailureReason = coalesce(tostring(ResultDescription), tostring(Status.failureReason))\\n| extend ResultCode = tostring(ResultType)\\n| where ResultCode !in ('0', 'Success') or isnotempty(FailureReason)\\n| summarize FailedAttempts = count(), DistinctIPs = dcount(IPAddress), LastAttempt = max(TimeGenerated) by UserPrincipalName, AppDisplayName\\n| where FailedAttempts >= 5 or DistinctIPs >= 3\\n| order by FailedAttempts desc, DistinctIPs desc\",\r\n        \"size\": 0,\r\n        \"title\": \"Authentication Anomalies\",\r\n        \"queryType\": 0,\r\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\r\n        \"crossComponentResources\": [\r\n          \"{WorkbookSourceId}\"\r\n        ],\r\n        \"timeContext\": {\r\n          \"durationMs\": 86400000\r\n        },\r\n        \"visualization\": \"table\"\r\n      },\r\n      \"name\": \"authenticationAnomalies\"\r\n    },\r\n    {\r\n      \"type\": 9,\r\n      \"content\": {\r\n        \"version\": \"KqlItem/1.0\",\r\n        \"query\": \"let lookback = 6h;\\nHeartbeat\\n| where TimeGenerated >= ago(lookback)\\n| summarize HeartbeatCount = count(), LastHeartbeat = max(TimeGenerated) by Computer, _ResourceId\\n| extend MinutesSinceLastHeartbeat = datetime_diff('minute', now(), LastHeartbeat)\\n| where MinutesSinceLastHeartbeat > 10 or HeartbeatCount < 3\\n| project Computer, _ResourceId, LastHeartbeat, MinutesSinceLastHeartbeat, HeartbeatCount\\n| order by MinutesSinceLastHeartbeat desc\",\r\n        \"size\": 0,\r\n        \"title\": \"Service Health Regressions\",\r\n        \"queryType\": 0,\r\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\r\n        \"crossComponentResources\": [\r\n          \"{WorkbookSourceId}\"\r\n        ],\r\n        \"timeContext\": {\r\n          \"durationMs\": 21600000\r\n        },\r\n        \"visualization\": \"table\"\r\n      },\r\n      \"name\": \"serviceHealthRegressions\"\r\n    }\r\n  ],\r\n  \"fallbackResourceIds\": [\r\n    \"{WorkbookSourceId}\"\r\n  ],\r\n  \"isLocked\": false\r\n}",
+    "suffix": "[uniqueString(resourceGroup().id)]",
+    "actionGroupName": "[format('ag-ir-{0}-{1}', parameters('environment'), variables('suffix'))]",
+    "logAnalyticsName": "[format('log-ir-{0}-{1}', parameters('environment'), variables('suffix'))]",
+    "workbookName": "[guid(resourceGroup().id, 'incident-response-dashboard', parameters('environment'))]",
+    "highSeverityAlertQuery": "[format('{0}\n| summarize AggregatedValue = sum(EventCount)', replace(variables('$fxv#0'), 'let lookback = 24h;', 'let lookback = 30m;'))]",
+    "authenticationAlertQuery": "[format('{0}\n| summarize AggregatedValue = sum(FailedAttempts)', replace(variables('$fxv#1'), 'let lookback = 24h;', 'let lookback = 60m;'))]",
+    "serviceRegressionAlertQuery": "[format('{0}\n| summarize AggregatedValue = count()', replace(variables('$fxv#2'), 'let lookback = 6h;', 'let lookback = 60m;'))]",
+    "alertActionGroupIds": "[if(not(empty(parameters('notificationEmail'))), createArray(resourceId('Microsoft.Insights/actionGroups', variables('actionGroupName'))), createArray())]",
+    "scheduledAlerts": [
+      {
+        "name": "[format('sqr-ir-high-errors-{0}-{1}', parameters('environment'), variables('suffix'))]",
+        "displayName": "IR High Severity Errors",
+        "description": "Raises an alert when high-severity exceptions or diagnostics spike inside the alert window.",
+        "isEnabled": "[parameters('enableHighSeverityAlert')]",
+        "severity": 2,
+        "threshold": "[parameters('highSeverityAlertThreshold')]",
+        "query": "[variables('highSeverityAlertQuery')]",
+        "signal": "high-severity-errors"
+      },
+      {
+        "name": "[format('sqr-ir-auth-anomalies-{0}-{1}', parameters('environment'), variables('suffix'))]",
+        "displayName": "IR Authentication Anomalies",
+        "description": "Raises an alert when repeated failed sign-in activity breaches the configured threshold.",
+        "isEnabled": "[parameters('enableAuthenticationAlert')]",
+        "severity": 2,
+        "threshold": "[parameters('authenticationAlertThreshold')]",
+        "query": "[variables('authenticationAlertQuery')]",
+        "signal": "authentication-anomalies"
+      },
+      {
+        "name": "[format('sqr-ir-service-regressions-{0}-{1}', parameters('environment'), variables('suffix'))]",
+        "displayName": "IR Service Health Regressions",
+        "description": "Raises an alert when heartbeat gaps indicate degraded or missing service telemetry.",
+        "isEnabled": "[parameters('enableServiceRegressionAlert')]",
+        "severity": 3,
+        "threshold": "[parameters('serviceRegressionAlertThreshold')]",
+        "query": "[variables('serviceRegressionAlertQuery')]",
+        "signal": "service-health-regressions"
+      }
+    ],
+    "scheduledQueryRuleIds": "[concat(if(parameters('enableHighSeverityAlert'), createArray(resourceId('Microsoft.Insights/scheduledQueryRules', variables('scheduledAlerts')[0].name)), createArray()), if(parameters('enableAuthenticationAlert'), createArray(resourceId('Microsoft.Insights/scheduledQueryRules', variables('scheduledAlerts')[1].name)), createArray()), if(parameters('enableServiceRegressionAlert'), createArray(resourceId('Microsoft.Insights/scheduledQueryRules', variables('scheduledAlerts')[2].name)), createArray()))]",
+    "tags": {
+      "Environment": "[parameters('environment')]",
+      "ManagedBy": "Bicep",
+      "Project": "KQL-Incident-Response-Dashboard"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2022-10-01",
+      "name": "[variables('logAnalyticsName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "retentionInDays": 30,
+        "sku": {
+          "name": "PerGB2018"
+        }
+      }
+    },
+    {
+      "condition": "[not(empty(parameters('notificationEmail')))]",
+      "type": "Microsoft.Insights/actionGroups",
+      "apiVersion": "2023-01-01",
+      "name": "[variables('actionGroupName')]",
+      "location": "global",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "emailReceivers": [
+          {
+            "emailAddress": "[parameters('notificationEmail')]",
+            "name": "primaryOnCall",
+            "useCommonAlertSchema": true
+          }
+        ],
+        "enabled": true,
+        "groupShortName": "[format('IR{0}', toUpper(parameters('environment')))]"
+      }
+    },
+    {
+      "type": "Microsoft.Insights/workbooks",
+      "apiVersion": "2023-06-01",
+      "name": "[variables('workbookName')]",
+      "kind": "shared",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "category": "workbook",
+        "description": "Operational workbook for KQL-driven incident response.",
+        "displayName": "KQL Incident Response Dashboard",
+        "serializedData": "[variables('$fxv#3')]",
+        "sourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]",
+        "version": "Notebook/1.0"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      ]
+    },
+    {
+      "copy": {
+        "name": "scheduledQueryRules",
+        "count": "[length(variables('scheduledAlerts'))]"
+      },
+      "condition": "[and(parameters('deployScheduledAlerts'), variables('scheduledAlerts')[copyIndex()].isEnabled)]",
+      "type": "Microsoft.Insights/scheduledQueryRules",
+      "apiVersion": "2025-01-01-preview",
+      "name": "[variables('scheduledAlerts')[copyIndex()].name]",
+      "kind": "LogAlert",
+      "location": "[parameters('location')]",
+      "tags": "[union(variables('tags'), createObject('Signal', variables('scheduledAlerts')[copyIndex()].signal))]",
+      "properties": "[shallowMerge(createArray(createObject('autoMitigate', false(), 'checkWorkspaceAlertsStorageConfigured', false(), 'criteria', createObject('allOf', createArray(createObject('criterionType', 'StaticThresholdCriterion', 'failingPeriods', createObject('minFailingPeriodsToAlert', 1, 'numberOfEvaluationPeriods', 1), 'metricMeasureColumn', 'AggregatedValue', 'operator', 'GreaterThan', 'query', variables('scheduledAlerts')[copyIndex()].query, 'threshold', variables('scheduledAlerts')[copyIndex()].threshold, 'timeAggregation', 'Average'))), 'description', variables('scheduledAlerts')[copyIndex()].description, 'displayName', variables('scheduledAlerts')[copyIndex()].displayName, 'enabled', true(), 'evaluationFrequency', parameters('alertEvaluationFrequency'), 'muteActionsDuration', 'PT30M', 'overrideQueryTimeRange', parameters('alertWindowSize'), 'scopes', createArray(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))), 'severity', variables('scheduledAlerts')[copyIndex()].severity, 'skipQueryValidation', false(), 'targetResourceTypes', createArray('Microsoft.OperationalInsights/workspaces'), 'windowSize', parameters('alertWindowSize')), if(empty(variables('alertActionGroupIds')), createObject(), createObject('actions', createObject('actionGroups', variables('alertActionGroupIds'), 'customProperties', createObject('Project', 'KQL-Incident-Response-Dashboard', 'Signal', variables('scheduledAlerts')[copyIndex()].signal))))))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/actionGroups', variables('actionGroupName'))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "workspaceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+    },
+    "workbookId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Insights/workbooks', variables('workbookName'))]"
+    },
+    "actionGroupId": {
+      "type": "string",
+      "value": "[if(not(empty(parameters('notificationEmail'))), resourceId('Microsoft.Insights/actionGroups', variables('actionGroupName')), '')]"
+    },
+    "scheduledQueryRuleIds": {
+      "type": "array",
+      "value": "[if(parameters('deployScheduledAlerts'), variables('scheduledQueryRuleIds'), createArray())]"
+    }
+  }
+}

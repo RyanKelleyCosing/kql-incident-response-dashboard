@@ -1,0 +1,10 @@
+[
+  {
+    "CurrentCount": 42,
+    "PreviousCount": 28,
+    "DeltaCount": 14,
+    "DeltaPercent": 50.0,
+    "LatestEvent": "2026-04-16T07:42:00Z",
+    "TopEntity": "AppExceptions"
+  }
+]

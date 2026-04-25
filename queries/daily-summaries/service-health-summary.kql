@@ -1,0 +1,41 @@
+let currentWindowEnd = now();
+let currentWindowStart = ago(24h);
+let previousWindowStart = ago(48h);
+let previousWindowEnd = currentWindowStart;
+let heartbeatSummary =
+    Heartbeat
+    | where TimeGenerated >= previousWindowStart
+    | extend Window = iff(TimeGenerated >= currentWindowStart, 'Current', 'Previous')
+    | summarize HeartbeatCount = count(), LastHeartbeat = max(TimeGenerated) by Window, Computer, _ResourceId;
+let regressions =
+    heartbeatSummary
+    | extend WindowEnd = iff(Window == 'Current', currentWindowEnd, previousWindowEnd)
+    | extend MinutesSinceWindowEnd = datetime_diff('minute', WindowEnd, LastHeartbeat)
+    | where MinutesSinceWindowEnd > 10 or HeartbeatCount < 3;
+let totals =
+    regressions
+    | summarize
+        CurrentAffectedResources = countif(Window == 'Current'),
+        PreviousAffectedResources = countif(Window == 'Previous'),
+        WorstGapMinutesCurrent = maxif(MinutesSinceWindowEnd, Window == 'Current'),
+        LatestEvent = max(LastHeartbeat);
+let topCurrent =
+    regressions
+    | where Window == 'Current'
+    | top 1 by MinutesSinceWindowEnd desc, HeartbeatCount asc
+    | project TopEntity = coalesce(Computer, _ResourceId);
+totals
+| extend JoinKey = 1
+| join kind=leftouter (topCurrent | extend JoinKey = 1) on JoinKey
+| project
+    CurrentAffectedResources = coalesce(CurrentAffectedResources, 0),
+    PreviousAffectedResources = coalesce(PreviousAffectedResources, 0),
+    DeltaCount = CurrentAffectedResources - PreviousAffectedResources,
+    DeltaPercent = iff(
+        PreviousAffectedResources == 0,
+        real(null),
+        round((todouble(CurrentAffectedResources - PreviousAffectedResources) / todouble(PreviousAffectedResources)) * 100.0, 2)
+    ),
+    WorstGapMinutesCurrent = coalesce(WorstGapMinutesCurrent, 0),
+    LatestEvent,
+    TopEntity = coalesce(TopEntity, 'None')

@@ -1,0 +1,39 @@
+let currentWindowStart = ago(24h);
+let previousWindowStart = ago(48h);
+let filteredEvents =
+    union isfuzzy=true withsource=SourceTable AppExceptions, AppTraces, AzureDiagnostics
+    | where TimeGenerated >= previousWindowStart
+    | extend SeverityValue = coalesce(tolong(SeverityLevel), tolong(Level), 0)
+    | extend Message = coalesce(
+        tostring(OuterMessage),
+        tostring(Message),
+        tostring(RenderedDescription),
+        tostring(ResultDescription)
+    )
+    | where SeverityValue >= 3 or Message has_any ('critical', 'fatal', 'panic', 'sev0', 'sev1', 'high priority');
+let totals =
+    filteredEvents
+    | summarize
+        CurrentCount = countif(TimeGenerated >= currentWindowStart),
+        PreviousCount = countif(TimeGenerated < currentWindowStart),
+        LatestEvent = max(TimeGenerated);
+let topSource =
+    filteredEvents
+    | where TimeGenerated >= currentWindowStart
+    | summarize CurrentSourceCount = count() by SourceTable
+    | top 1 by CurrentSourceCount desc
+    | project TopEntity = SourceTable;
+totals
+| extend JoinKey = 1
+| join kind=leftouter (topSource | extend JoinKey = 1) on JoinKey
+| project
+    CurrentCount,
+    PreviousCount,
+    DeltaCount = CurrentCount - PreviousCount,
+    DeltaPercent = iff(
+        PreviousCount == 0,
+        real(null),
+        round((todouble(CurrentCount - PreviousCount) / todouble(PreviousCount)) * 100.0, 2)
+    ),
+    LatestEvent,
+    TopEntity = coalesce(TopEntity, 'None')
