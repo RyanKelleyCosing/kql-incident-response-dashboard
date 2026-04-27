@@ -2,8 +2,15 @@ let currentWindowEnd = now();
 let currentWindowStart = ago(24h);
 let previousWindowStart = ago(48h);
 let previousWindowEnd = currentWindowStart;
+// Fallback schema guarantees the query resolves even when the Heartbeat
+// table is not present in the workspace.
+let schemaFallback = datatable(
+    TimeGenerated:datetime,
+    Computer:string,
+    _ResourceId:string
+)[];
 let heartbeatSummary =
-    Heartbeat
+    union isfuzzy=true schemaFallback, Heartbeat
     | where TimeGenerated >= previousWindowStart
     | extend Window = iff(TimeGenerated >= currentWindowStart, 'Current', 'Previous')
     | summarize HeartbeatCount = count(), LastHeartbeat = max(TimeGenerated) by Window, Computer, _ResourceId;
