@@ -173,8 +173,12 @@ function Get-QueryRows {
     }
 
     $resolvedWorkspaceId = Resolve-WorkspaceCustomerId -Value $WorkspaceId
-    $queryText = Get-Content $QueryPath -Raw
-    $queryResult = az monitor log-analytics query --workspace $resolvedWorkspaceId --analytics-query $queryText --output json --only-show-errors 2>&1
+    # Pass the query via az CLI's @<file> argument syntax so multi-line KQL
+    # text is read directly from disk. This avoids PowerShell's legacy
+    # native-argument escaping on Windows, which can mangle embedded
+    # newlines and cause the service to reject the query with
+    # "No tabular expression statement found".
+    $queryResult = az monitor log-analytics query --workspace $resolvedWorkspaceId --analytics-query "@$QueryPath" --output json --only-show-errors 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Log Analytics query failed for '$QueryPath': $queryResult"
     }
