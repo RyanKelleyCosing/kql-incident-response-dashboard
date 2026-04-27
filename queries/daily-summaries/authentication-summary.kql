@@ -11,7 +11,9 @@ let schemaFallback = datatable(
     IPAddress:string,
     UserPrincipalName:string,
     AppDisplayName:string
-)[];
+)[
+    datetime(1900-01-01), '', dynamic({}), '', '', '', ''
+];
 let failedSignIns =
     union isfuzzy=true schemaFallback, SigninLogs, AADNonInteractiveUserSignInLogs
     | where TimeGenerated >= previousWindowStart

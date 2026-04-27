@@ -8,7 +8,9 @@ let schemaFallback = datatable(
     TimeGenerated:datetime,
     Computer:string,
     _ResourceId:string
-)[];
+)[
+    datetime(1900-01-01), '', ''
+];
 let heartbeatSummary =
     union isfuzzy=true schemaFallback, Heartbeat
     | where TimeGenerated >= previousWindowStart

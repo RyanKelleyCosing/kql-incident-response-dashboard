@@ -10,7 +10,9 @@ let schemaFallback = datatable(
     Message:string,
     RenderedDescription:string,
     ResultDescription:string
-)[];
+)[
+    datetime(1900-01-01), int(0), int(0), '', '', '', ''
+];
 let filteredEvents =
     union isfuzzy=true withsource=SourceTable schemaFallback, AppExceptions, AppTraces, AzureDiagnostics
     | where TimeGenerated >= previousWindowStart
