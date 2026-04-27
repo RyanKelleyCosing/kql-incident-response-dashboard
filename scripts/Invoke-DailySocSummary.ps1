@@ -175,12 +175,16 @@ function Get-QueryRows {
     $resolvedWorkspaceId = Resolve-WorkspaceCustomerId -Value $WorkspaceId
 
     # `az` on Windows is a `.cmd` shim, and cmd.exe truncates command-line
-    # arguments at embedded newlines. Collapse the multi-line KQL text into
-    # a single line (KQL is whitespace-insensitive between tokens, and
-    # `let` statements are already terminated by `;`) so the query reaches
-    # the service intact instead of being rejected with
+    # arguments at embedded newlines. Strip KQL `//` line comments first so
+    # they cannot swallow the rest of the query once newlines are removed,
+    # then collapse the multi-line text into a single line (KQL is
+    # whitespace-insensitive between tokens, and `let` statements are
+    # already terminated by `;`). This keeps the query intact end-to-end
+    # instead of being rejected with
     # "No tabular expression statement found".
-    $queryText = (Get-Content $QueryPath -Raw) -replace '\r?\n', ' '
+    $rawQuery = Get-Content $QueryPath -Raw
+    $withoutComments = ($rawQuery -split "`r?`n" | ForEach-Object { $_ -replace '//.*$', '' }) -join "`n"
+    $queryText = $withoutComments -replace '\r?\n', ' '
     $queryResult = az monitor log-analytics query --workspace $resolvedWorkspaceId --analytics-query $queryText --output json --only-show-errors 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Log Analytics query failed for '$QueryPath': $queryResult"
