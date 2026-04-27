@@ -187,6 +187,15 @@ function Get-QueryRows {
     $queryText = $withoutComments -replace '\r?\n', ' '
     $queryResult = az monitor log-analytics query --workspace $resolvedWorkspaceId --analytics-query $queryText --output json --only-show-errors 2>&1
     if ($LASTEXITCODE -ne 0) {
+        $resultText = [string]$queryResult
+        # Treat missing tables/columns as "no signal" so the daily digest still
+        # renders. The Log Analytics service surfaces these as SemanticError
+        # (SEM0100 for missing columns, SEM0001 for missing tables); both are
+        # benign for a fresh workspace and should not break the workflow.
+        if ($resultText -match 'SemanticError' -or $resultText -match "Failed to resolve" -or $resultText -match 'SEM0001' -or $resultText -match 'SEM0100') {
+            Write-Warning "Query '$QueryPath' returned no resolvable schema; treating as empty: $resultText"
+            return @()
+        }
         throw "Log Analytics query failed for '$QueryPath': $queryResult"
     }
 

@@ -1,21 +1,7 @@
 let currentWindowStart = ago(24h);
 let previousWindowStart = ago(48h);
-// Fallback schema guarantees that every column referenced below resolves
-// even when neither SigninLogs nor AADNonInteractiveUserSignInLogs is
-// present in the workspace.
-let schemaFallback = datatable(
-    TimeGenerated:datetime,
-    ResultDescription:string,
-    Status:dynamic,
-    ResultType:string,
-    IPAddress:string,
-    UserPrincipalName:string,
-    AppDisplayName:string
-)[
-    datetime(1900-01-01), '', dynamic({}), '', '', '', ''
-];
 let failedSignIns =
-    union isfuzzy=true schemaFallback, SigninLogs, AADNonInteractiveUserSignInLogs
+    union isfuzzy=true SigninLogs, AADNonInteractiveUserSignInLogs
     | where TimeGenerated >= previousWindowStart
     | extend FailureReason = coalesce(tostring(ResultDescription), tostring(Status.failureReason))
     | extend ResultCode = tostring(ResultType)

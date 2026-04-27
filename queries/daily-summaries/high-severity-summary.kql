@@ -1,20 +1,7 @@
 let currentWindowStart = ago(24h);
 let previousWindowStart = ago(48h);
-// Fallback schema guarantees that every column referenced below resolves
-// even when none of the unioned tables are present in the workspace.
-let schemaFallback = datatable(
-    TimeGenerated:datetime,
-    SeverityLevel:int,
-    Level:int,
-    OuterMessage:string,
-    Message:string,
-    RenderedDescription:string,
-    ResultDescription:string
-)[
-    datetime(1900-01-01), int(0), int(0), '', '', '', ''
-];
 let filteredEvents =
-    union isfuzzy=true withsource=SourceTable schemaFallback, AppExceptions, AppTraces, AzureDiagnostics
+    union isfuzzy=true withsource=SourceTable AppExceptions, AppTraces, AzureDiagnostics
     | where TimeGenerated >= previousWindowStart
     | extend SeverityValue = coalesce(tolong(SeverityLevel), tolong(Level), 0)
     | extend Message = coalesce(
