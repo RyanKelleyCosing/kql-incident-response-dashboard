@@ -24,7 +24,8 @@ let topCurrent =
     anomalySummary
     | where Window == 'Current'
     | extend UserAndApp = strcat(coalesce(UserPrincipalName, 'unknown-user'), ' @ ', coalesce(AppDisplayName, 'unknown-app'))
-    | top 1 by FailedAttempts desc, DistinctIPs desc
+    | order by FailedAttempts desc, DistinctIPs desc
+    | take 1
     | project TopEntity = UserAndApp;
 totals
 | extend JoinKey = 1

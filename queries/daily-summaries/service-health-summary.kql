@@ -22,7 +22,8 @@ let totals =
 let topCurrent =
     regressions
     | where Window == 'Current'
-    | top 1 by MinutesSinceWindowEnd desc, HeartbeatCount asc
+    | order by MinutesSinceWindowEnd desc, HeartbeatCount asc
+    | take 1
     | project TopEntity = coalesce(Computer, _ResourceId);
 totals
 | extend JoinKey = 1
