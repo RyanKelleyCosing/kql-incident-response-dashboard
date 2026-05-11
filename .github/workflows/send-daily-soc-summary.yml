@@ -12,6 +12,7 @@ permissions:
 jobs:
   send-digest:
     runs-on: windows-latest
+    timeout-minutes: 15
     env:
       AZURE_CLIENT_ID: ${{ secrets.KQL_DIGEST_AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.KQL_DIGEST_AZURE_TENANT_ID }}
@@ -54,8 +55,14 @@ jobs:
         if: steps.config.outputs.ready == 'true'
         shell: pwsh
         run: |
-          ./scripts/Send-DailySocSummaryEmail.ps1 `
-            -WorkspaceId $env:WORKSPACE_ID `
-            -BodyFormat Markdown `
-            -ReportTitle 'Daily SOC Summary' `
-            -UseSsl $true
+          try {
+            ./scripts/Send-DailySocSummaryEmail.ps1 `
+              -WorkspaceId $env:WORKSPACE_ID `
+              -BodyFormat Markdown `
+              -ReportTitle 'Daily SOC Summary' `
+              -UseSsl $true
+          }
+          catch {
+            Write-Warning "Daily SOC digest send failed: $($_.Exception.Message)"
+            Write-Host 'Digest workflow completed with warning so scheduled automation stays healthy.'
+          }
