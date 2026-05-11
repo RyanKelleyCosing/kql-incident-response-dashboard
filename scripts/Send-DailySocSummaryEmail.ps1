@@ -25,6 +25,7 @@ param(
     [int]$SmtpPort = 587,
     [bool]$UseSsl = $true,
     [pscredential]$SmtpCredential,
+    [switch]$FailOnSendError,
     [switch]$PreviewOnly
 )
 
@@ -100,38 +101,54 @@ function Send-SmtpDigest {
         [pscredential]$SmtpCredential
     )
 
-    $mailMessage = [System.Net.Mail.MailMessage]::new()
-    try {
-        $mailMessage.From = [System.Net.Mail.MailAddress]::new($From)
-        foreach ($recipient in $To) {
-            if (-not [string]::IsNullOrWhiteSpace($recipient)) {
-                $mailMessage.To.Add($recipient)
+    $lastError = $null
+
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $mailMessage = [System.Net.Mail.MailMessage]::new()
+        try {
+            $mailMessage.From = [System.Net.Mail.MailAddress]::new($From)
+            foreach ($recipient in $To) {
+                if (-not [string]::IsNullOrWhiteSpace($recipient)) {
+                    $mailMessage.To.Add($recipient)
+                }
+            }
+
+            $mailMessage.Subject = $Subject
+            $mailMessage.Body = $Body
+            $mailMessage.IsBodyHtml = $IsBodyHtml
+            $mailMessage.BodyEncoding = [System.Text.Encoding]::UTF8
+            $mailMessage.SubjectEncoding = [System.Text.Encoding]::UTF8
+
+            $smtpClient = [System.Net.Mail.SmtpClient]::new($SmtpServer, $SmtpPort)
+            try {
+                $smtpClient.EnableSsl = $UseSsl
+                $smtpClient.DeliveryMethod = [System.Net.Mail.SmtpDeliveryMethod]::Network
+
+                if ($null -ne $SmtpCredential) {
+                    $smtpClient.Credentials = $SmtpCredential
+                }
+
+                $smtpClient.Send($mailMessage)
+                return
+            }
+            finally {
+                $smtpClient.Dispose()
             }
         }
-
-        $mailMessage.Subject = $Subject
-        $mailMessage.Body = $Body
-        $mailMessage.IsBodyHtml = $IsBodyHtml
-        $mailMessage.BodyEncoding = [System.Text.Encoding]::UTF8
-        $mailMessage.SubjectEncoding = [System.Text.Encoding]::UTF8
-
-        $smtpClient = [System.Net.Mail.SmtpClient]::new($SmtpServer, $SmtpPort)
-        try {
-            $smtpClient.EnableSsl = $UseSsl
-            $smtpClient.DeliveryMethod = [System.Net.Mail.SmtpDeliveryMethod]::Network
-
-            if ($null -ne $SmtpCredential) {
-                $smtpClient.Credentials = $SmtpCredential
+        catch {
+            $lastError = $_
+            if ($attempt -lt 3) {
+                Write-Warning "SMTP send attempt $attempt failed. Retrying..."
+                Start-Sleep -Seconds (2 * $attempt)
             }
-
-            $smtpClient.Send($mailMessage)
         }
         finally {
-            $smtpClient.Dispose()
+            $mailMessage.Dispose()
         }
     }
-    finally {
-        $mailMessage.Dispose()
+
+    if ($null -ne $lastError) {
+        throw $lastError
     }
 }
 
@@ -191,21 +208,54 @@ else {
     $SmtpServer
 }
 
+$allowAnonymousSmtp = $env:KQL_DIGEST_SMTP_ALLOW_ANONYMOUS -match '^(1|true|yes)$'
+
+if ($null -eq $SmtpCredential -and -not $allowAnonymousSmtp) {
+    Write-Warning 'SMTP credentials are not configured. Emitting preview payload and skipping send. Set KQL_DIGEST_SMTP_ALLOW_ANONYMOUS=true to attempt anonymous relay.'
+    [pscustomobject]@{
+        Subject = $subjectLine
+        BodyFormat = $BodyFormat
+        Recipients = @($resolvedRecipients)
+        Body = $messageBody
+        SendSkipped = $true
+        SkipReason = 'Missing SMTP credentials'
+    } | ConvertTo-Json -Depth 4
+    return
+}
+
 $resolvedFrom = Get-RequiredValue -Value $resolvedFrom -Name 'From'
 $resolvedServer = Get-RequiredValue -Value $resolvedServer -Name 'SmtpServer'
 if ($resolvedRecipients.Count -eq 0) {
     throw "Parameter 'To' is required unless KQL_DIGEST_EMAIL_TO is configured."
 }
 
-Send-SmtpDigest `
-    -Subject $subjectLine `
-    -To $resolvedRecipients `
-    -From $resolvedFrom `
-    -Body $messageBody `
-    -IsBodyHtml ($BodyFormat -eq 'Html') `
-    -SmtpServer $resolvedServer `
-    -SmtpPort $SmtpPort `
-    -UseSsl $UseSsl `
-    -SmtpCredential $SmtpCredential
+try {
+    Send-SmtpDigest `
+        -Subject $subjectLine `
+        -To $resolvedRecipients `
+        -From $resolvedFrom `
+        -Body $messageBody `
+        -IsBodyHtml ($BodyFormat -eq 'Html') `
+        -SmtpServer $resolvedServer `
+        -SmtpPort $SmtpPort `
+        -UseSsl $UseSsl `
+        -SmtpCredential $SmtpCredential
+}
+catch {
+    if ($FailOnSendError) {
+        throw
+    }
+
+    Write-Warning "SMTP send failed. Emitting preview payload and skipping send: $($_.Exception.Message)"
+    [pscustomobject]@{
+        Subject = $subjectLine
+        BodyFormat = $BodyFormat
+        Recipients = @($resolvedRecipients)
+        Body = $messageBody
+        SendSkipped = $true
+        SkipReason = 'SMTP send failed'
+    } | ConvertTo-Json -Depth 4
+    return
+}
 
 Write-Information "Sent daily SOC summary to $($resolvedRecipients -join ', ')" -InformationAction Continue

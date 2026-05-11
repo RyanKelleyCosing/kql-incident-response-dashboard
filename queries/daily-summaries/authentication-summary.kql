@@ -2,28 +2,37 @@ let currentWindowStart = ago(24h);
 let previousWindowStart = ago(48h);
 let failedSignIns =
     union isfuzzy=true SigninLogs, AADNonInteractiveUserSignInLogs
-    | where TimeGenerated >= previousWindowStart
-    | extend FailureReason = coalesce(tostring(ResultDescription), tostring(Status.failureReason))
-    | extend ResultCode = tostring(ResultType)
+    | extend EventTime = todatetime(column_ifexists('TimeGenerated', datetime(null)))
+    | where isnotnull(EventTime) and EventTime >= previousWindowStart
+    | extend StatusPayload = todynamic(column_ifexists('Status', dynamic(null)))
+    | extend UserPrincipalNameNorm = tostring(column_ifexists('UserPrincipalName', ''))
+    | extend AppDisplayNameNorm = tostring(column_ifexists('AppDisplayName', ''))
+    | extend IPAddressNorm = tostring(column_ifexists('IPAddress', ''))
+    | extend FailureReason = coalesce(
+        tostring(column_ifexists('ResultDescription', '')),
+        tostring(StatusPayload.failureReason),
+        tostring(column_ifexists('FailureReason', ''))
+    )
+    | extend ResultCode = tostring(column_ifexists('ResultType', ''))
     | where ResultCode !in ('0', 'Success') or isnotempty(FailureReason);
 let anomalySummary =
     failedSignIns
-    | extend Window = iff(TimeGenerated >= currentWindowStart, 'Current', 'Previous')
-    | summarize FailedAttempts = count(), DistinctIPs = dcount(IPAddress), LastAttempt = max(TimeGenerated) by Window, UserPrincipalName, AppDisplayName
+    | extend Window = iff(EventTime >= currentWindowStart, 'Current', 'Previous')
+    | summarize FailedAttempts = count(), DistinctIPs = dcount(IPAddressNorm), LastAttempt = max(EventTime) by Window, UserPrincipalNameNorm, AppDisplayNameNorm
     | where FailedAttempts >= 5 or DistinctIPs >= 3;
 let totals =
     anomalySummary
     | summarize
         CurrentFailedAttempts = sumif(FailedAttempts, Window == 'Current'),
         PreviousFailedAttempts = sumif(FailedAttempts, Window == 'Previous'),
-        CurrentAnomalousUsers = dcountif(UserPrincipalName, Window == 'Current'),
-        PreviousAnomalousUsers = dcountif(UserPrincipalName, Window == 'Previous'),
+        CurrentAnomalousUsers = dcountif(UserPrincipalNameNorm, Window == 'Current'),
+        PreviousAnomalousUsers = dcountif(UserPrincipalNameNorm, Window == 'Previous'),
         MaxDistinctIPsCurrent = maxif(DistinctIPs, Window == 'Current'),
         LatestEvent = max(LastAttempt);
 let topCurrent =
     anomalySummary
     | where Window == 'Current'
-    | extend UserAndApp = strcat(coalesce(UserPrincipalName, 'unknown-user'), ' @ ', coalesce(AppDisplayName, 'unknown-app'))
+    | extend UserAndApp = strcat(coalesce(UserPrincipalNameNorm, 'unknown-user'), ' @ ', coalesce(AppDisplayNameNorm, 'unknown-app'))
     | order by FailedAttempts desc, DistinctIPs desc
     | take 1
     | project TopEntity = UserAndApp;

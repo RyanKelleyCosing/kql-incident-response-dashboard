@@ -2,24 +2,29 @@ let currentWindowStart = ago(24h);
 let previousWindowStart = ago(48h);
 let filteredEvents =
     union isfuzzy=true withsource=SourceTable AppExceptions, AppTraces, AzureDiagnostics
-    | where TimeGenerated >= previousWindowStart
-    | extend SeverityValue = coalesce(tolong(SeverityLevel), tolong(Level), 0)
+    | extend EventTime = todatetime(column_ifexists('TimeGenerated', datetime(null)))
+    | where isnotnull(EventTime) and EventTime >= previousWindowStart
+    | extend SeverityValue = coalesce(
+        tolong(column_ifexists('SeverityLevel', 0)),
+        tolong(column_ifexists('Level', 0)),
+        0
+    )
     | extend Message = coalesce(
         tostring(OuterMessage),
         tostring(Message),
-        tostring(RenderedDescription),
-        tostring(ResultDescription)
+        tostring(column_ifexists('RenderedDescription', '')),
+        tostring(column_ifexists('ResultDescription', ''))
     )
     | where SeverityValue >= 3 or Message has_any ('critical', 'fatal', 'panic', 'sev0', 'sev1', 'high priority');
 let totals =
     filteredEvents
     | summarize
-        CurrentCount = countif(TimeGenerated >= currentWindowStart),
-        PreviousCount = countif(TimeGenerated < currentWindowStart),
-        LatestEvent = max(TimeGenerated);
+        CurrentCount = countif(EventTime >= currentWindowStart),
+        PreviousCount = countif(EventTime < currentWindowStart),
+        LatestEvent = max(EventTime);
 let topSource =
     filteredEvents
-    | where TimeGenerated >= currentWindowStart
+    | where EventTime >= currentWindowStart
     | summarize CurrentSourceCount = count() by SourceTable
     | top 1 by CurrentSourceCount desc
     | project TopEntity = SourceTable;
